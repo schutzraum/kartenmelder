@@ -1,0 +1,5 @@
+{
+  "name": "Karten-Melder",
+  "description": "Eine Plattform, um illegale Autohändler-Karten zu melden, Statistiken einzusehen und Nerv-Scores zu tracken.",
+  "requestFramePermissions": []
+}

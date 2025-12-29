@@ -1,47 +1,22 @@
+
 import { Report, CityStat, FeedbackEntry, AppSettings } from '../types';
 
 const STORAGE_KEY = 'karten_melder_reports';
 const FEEDBACK_KEY = 'karten_melder_feedback';
 const SETTINGS_KEY = 'karten_melder_settings';
 
-// Seed data removed for authentic start.
-const SEED_DATA: Report[] = [];
-
 const loadReports = (): Report[] => {
   const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_DATA));
-    return SEED_DATA;
-  }
-  return JSON.parse(stored);
+  return stored ? JSON.parse(stored) : [];
 };
 
 const saveReports = (reports: Report[]) => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(reports));
 };
 
-const loadFeedback = (): FeedbackEntry[] => {
-  const stored = localStorage.getItem(FEEDBACK_KEY);
-  return stored ? JSON.parse(stored) : [];
-};
-
-const saveFeedbackList = (list: FeedbackEntry[]) => {
-  localStorage.setItem(FEEDBACK_KEY, JSON.stringify(list));
-};
-
-const loadSettings = (): AppSettings => {
-  const stored = localStorage.getItem(SETTINGS_KEY);
-  return stored ? JSON.parse(stored) : { feedbackEnabled: true };
-};
-
-const saveSettingsData = (settings: AppSettings) => {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-};
-
 const normalizePhone = (p: string) => p.replace(/\s/g, '');
 
 export const reportService = {
-  // --- Reports ---
   getAll: (): Report[] => {
     return loadReports().sort((a, b) => b.timestamp - a.timestamp);
   },
@@ -79,27 +54,28 @@ export const reportService = {
     saveReports(filtered);
   },
 
-  // --- Statistics ---
   getStatsByCity: (days?: number): CityStat[] => {
     const reports = loadReports();
     const now = Date.now();
     const cutoff = days ? now - (days * 24 * 60 * 60 * 1000) : 0;
 
     const filtered = reports.filter(r => r.timestamp >= cutoff);
-    const cityMap: Record<string, { count: number; scoreSum: number }> = {};
+    const cityMap: Record<string, { count: number; scoreSum: number; zip?: string }> = {};
 
     filtered.forEach(r => {
-      const city = r.location.trim() || 'Unbekannt';
-      if (!cityMap[city]) {
-        cityMap[city] = { count: 0, scoreSum: 0 };
+      // Grouping by city name
+      const key = r.cityName || "Unbekannt";
+      if (!cityMap[key]) {
+        cityMap[key] = { count: 0, scoreSum: 0, zip: r.zipCode };
       }
-      cityMap[city].count += 1;
-      cityMap[city].scoreSum += r.nervScore;
+      cityMap[key].count += 1;
+      cityMap[key].scoreSum += r.nervScore;
     });
 
     return Object.entries(cityMap)
       .map(([name, data]) => ({
         name,
+        zipCode: data.zip,
         count: data.count,
         avgScore: data.scoreSum / data.count
       }))
@@ -115,7 +91,7 @@ export const reportService = {
   },
 
   getTopNumbersByCity: (cityName: string): { phoneNumber: string, count: number, avgScore: number, companyName?: string }[] => {
-    const reports = loadReports().filter(r => r.location.toLowerCase().trim() === cityName.toLowerCase().trim());
+    const reports = loadReports().filter(r => (r.cityName || '').toLowerCase() === cityName.toLowerCase());
     
     const phoneMap: Record<string, { count: number, scoreSum: number, companyName?: string }> = {};
 
@@ -126,7 +102,6 @@ export const reportService = {
         }
         phoneMap[phone].count += 1;
         phoneMap[phone].scoreSum += r.nervScore;
-        // Keep the most recent company name found
         if (r.companyName) phoneMap[phone].companyName = r.companyName;
     });
 
@@ -148,17 +123,13 @@ export const reportService = {
     const companyNamesSet = new Set<string>();
 
     reports.forEach(r => {
-        const city = r.location || "Unbekannt";
-        if (!cityStats[city]) {
-            cityStats[city] = { count: 0, scoreSum: 0 };
+        const cityKey = `${r.cityName} (${r.zipCode})`;
+        if (!cityStats[cityKey]) {
+            cityStats[cityKey] = { count: 0, scoreSum: 0 };
         }
-        cityStats[city].count++;
-        cityStats[city].scoreSum += r.nervScore;
-        
-        // Collect unique company names
-        if (r.companyName && r.companyName.trim().length > 0) {
-            companyNamesSet.add(r.companyName.trim());
-        }
+        cityStats[cityKey].count++;
+        cityStats[cityKey].scoreSum += r.nervScore;
+        if (r.companyName) companyNamesSet.add(r.companyName.trim());
     });
 
     const cities = Object.entries(cityStats).map(([name, data]) => ({
@@ -167,50 +138,47 @@ export const reportService = {
         avgScore: data.scoreSum / data.count
     })).sort((a, b) => b.count - a.count);
 
-    const totalScoreSum = reports.reduce((acc, curr) => acc + curr.nervScore, 0);
-
     return {
         phoneNumber: reports[0].phoneNumber,
         companyNames: Array.from(companyNamesSet),
         totalCount: reports.length,
-        avgScore: totalScoreSum / reports.length,
+        avgScore: reports.reduce((acc, curr) => acc + curr.nervScore, 0) / reports.length,
         cities
     };
   },
 
-  // --- Feedback & Settings ---
-  
-  getSettings: (): AppSettings => {
-    return loadSettings();
+  getSettings: () => {
+    const stored = localStorage.getItem(SETTINGS_KEY);
+    return stored ? JSON.parse(stored) : { feedbackEnabled: true };
   },
 
   updateSettings: (settings: AppSettings) => {
-    saveSettingsData(settings);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   },
 
   addFeedback: (feedback: Omit<FeedbackEntry, 'id' | 'timestamp'>) => {
-    const list = loadFeedback();
-    const newEntry: FeedbackEntry = {
-      ...feedback,
-      id: Math.random().toString(36).substring(2, 9),
-      timestamp: Date.now(),
-    };
+    const stored = localStorage.getItem(FEEDBACK_KEY);
+    const list = stored ? JSON.parse(stored) : [];
+    const newEntry = { ...feedback, id: Math.random().toString(36).substring(2, 9), timestamp: Date.now() };
     list.push(newEntry);
-    saveFeedbackList(list);
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(list));
     return newEntry;
   },
 
-  getAllFeedback: (): FeedbackEntry[] => {
-    return loadFeedback().sort((a, b) => b.timestamp - a.timestamp);
+  getAllFeedback: () => {
+    const stored = localStorage.getItem(FEEDBACK_KEY);
+    return stored ? JSON.parse(stored).sort((a: any, b: any) => b.timestamp - a.timestamp) : [];
   },
 
-  getFeedbackById: (id: string): FeedbackEntry | undefined => {
-    return loadFeedback().find(f => f.id === id);
+  getFeedbackById: (id: string) => {
+    const stored = localStorage.getItem(FEEDBACK_KEY);
+    return stored ? JSON.parse(stored).find((f: any) => f.id === id) : undefined;
   },
 
   deleteFeedback: (id: string) => {
-    const list = loadFeedback();
-    const filtered = list.filter(f => f.id !== id);
-    saveFeedbackList(filtered);
+    const stored = localStorage.getItem(FEEDBACK_KEY);
+    if (!stored) return;
+    const list = JSON.parse(stored).filter((f: any) => f.id !== id);
+    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(list));
   }
 };

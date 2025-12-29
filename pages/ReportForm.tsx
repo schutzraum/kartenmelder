@@ -1,106 +1,104 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { reportService } from '../services/storage';
-import { ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { plzService } from '../services/plzService';
+import { ChevronDown, ChevronUp, CheckCircle2, AlertCircle, MapPin, PlusCircle } from 'lucide-react';
 
 const ReportForm: React.FC = () => {
   const navigate = useNavigate();
   const [showMore, setShowMore] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // PLZ State management
   const [zipDigits, setZipDigits] = useState<string[]>(['', '', '', '', '']);
+  const [detectedCity, setDetectedCity] = useState<string | null>(null);
+  const [manualCity, setManualCity] = useState<string>('');
+  const [isValidFormat, setIsValidFormat] = useState<boolean>(false);
+  const [isKnownPlz, setIsKnownPlz] = useState<boolean>(false);
+  
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const [formData, setFormData] = useState({
     phoneNumber: '',
     companyName: '',
     email: '',
-    location: '', // Will hold the full PLZ
     description: '',
     nervScore: 5,
   });
 
-  // Sync zipDigits to formData.location
   useEffect(() => {
     const fullZip = zipDigits.join('');
-    setFormData(prev => ({ ...prev, location: fullZip }));
+    if (fullZip.length === 5) {
+      setIsValidFormat(true);
+      const city = plzService.getCity(fullZip);
+      setDetectedCity(city);
+      setIsKnownPlz(!!city);
+      if (city) setManualCity(''); // Reset manual if known
+    } else {
+      setIsValidFormat(false);
+      setDetectedCity(null);
+      setIsKnownPlz(false);
+    }
   }, [zipDigits]);
 
-  // Specific handler for phone number to enforce format
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    // Remove non-digit characters
-    const cleanVal = val.replace(/\D/g, '');
-    
-    // Basic formatting: Insert space after 4 digits (e.g. 0176 12345678)
-    let formattedVal = cleanVal;
-    if (cleanVal.length > 4) {
-        formattedVal = cleanVal.substring(0, 4) + ' ' + cleanVal.substring(4);
-    }
-    
-    setFormData(prev => ({ ...prev, phoneNumber: formattedVal }));
+    const cleanVal = e.target.value.replace(/[^\d+ ]/g, '');
+    setFormData(prev => ({ ...prev, phoneNumber: cleanVal }));
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  // PLZ Logic
   const handleZipChange = (index: number, value: string) => {
-    // Handle paste of full zip code in first field
-    if (value.length === 5 && index === 0 && /^\d+$/.test(value)) {
-        const chars = value.split('');
-        setZipDigits(chars);
-        inputRefs.current[4]?.focus();
-        return;
-    }
-
-    // Allow only numbers
     if (!/^\d*$/.test(value)) return;
-
-    // Take only the last character entered (single digit per box)
     const char = value.slice(-1);
-    
     const newDigits = [...zipDigits];
     newDigits[index] = char;
     setZipDigits(newDigits);
-
-    // Auto-advance focus
-    if (char && index < 4) {
-        inputRefs.current[index + 1]?.focus();
-    }
+    if (char && index < 4) inputRefs.current[index + 1]?.focus();
   };
 
   const handleZipKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace' && !zipDigits[index] && index > 0) {
-        // Move back if deleting in an empty field
         inputRefs.current[index - 1]?.focus();
     }
   };
 
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData(prev => ({ ...prev, nervScore: parseInt(e.target.value) }));
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const paste = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 5);
+    if (paste.length === 5) {
+      setZipDigits(paste.split(''));
+      inputRefs.current[4]?.focus();
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const fullZip = zipDigits.join('');
     
-    if (formData.location.length !== 5) {
-        alert("Bitte gib eine vollständige 5-stellige Postleitzahl ein.");
+    if (!isValidFormat) {
+        alert("Bitte gib eine vollständige Postleitzahl ein.");
+        return;
+    }
+
+    const finalCity = detectedCity || manualCity;
+    if (!finalCity) {
+        alert("Bitte gib einen Ortsnamen für diese Postleitzahl an.");
         return;
     }
 
     setIsSubmitting(true);
+    
+    // If it's a new PLZ-City mapping, save it to the custom database
+    if (!detectedCity && manualCity) {
+        plzService.addCustomPlz(fullZip, manualCity);
+    }
 
-    // Simulate network delay for better UX
     setTimeout(() => {
       const newReport = reportService.add({
         phoneNumber: formData.phoneNumber,
         companyName: formData.companyName || undefined,
         email: formData.email || undefined,
-        location: formData.location, // Contains PLZ
+        zipCode: fullZip,
+        cityName: finalCity,
+        location: `${finalCity} (${fullZip})`,
         description: formData.description || undefined,
         nervScore: formData.nervScore,
       });
@@ -109,165 +107,162 @@ const ReportForm: React.FC = () => {
     }, 800);
   };
 
-  // Calculate slider color
-  const sliderColor = formData.nervScore <= 3 ? 'accent-brand-500' : formData.nervScore <= 7 ? 'accent-amber-500' : 'accent-red-500';
-
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
-      <div className="bg-white rounded-2xl shadow-lg border border-slate-100 overflow-hidden">
-        <div className="bg-slate-900 px-8 py-6 text-white">
+      <div className="bg-white rounded-3xl shadow-xl border border-slate-100 overflow-hidden animate-fade-in">
+        <div className="bg-slate-900 px-8 py-8 text-white relative">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <MapPin size={80} />
+          </div>
           <h1 className="text-2xl font-bold">Neue Karte melden</h1>
-          <p className="text-slate-400 text-sm mt-1">Hilf der Community und dokumentiere nervige Werbung.</p>
+          <p className="text-slate-400 text-sm mt-1">Helfe mit, illegale Werbung zu dokumentieren.</p>
         </div>
         
-        <form onSubmit={handleSubmit} className="p-8 space-y-6">
-          
-          {/* Primary Fields Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="md:col-span-1">
-                <label htmlFor="phoneNumber" className="block text-sm font-semibold text-slate-700 mb-2">
-                Telefonnummer <span className="text-red-500">*</span>
-                </label>
+        <form onSubmit={handleSubmit} className="p-8 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-2">
+                <label className="text-xs font-black text-slate-500 uppercase tracking-widest">Telefonnummer *</label>
                 <input
-                type="text"
-                id="phoneNumber"
-                name="phoneNumber"
-                required
-                placeholder="0176 12345678"
-                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all font-mono"
-                value={formData.phoneNumber}
-                onChange={handlePhoneChange}
+                    type="text"
+                    required
+                    placeholder="+49 176 ..."
+                    className="w-full px-5 py-4 rounded-xl border-2 border-slate-100 focus:border-brand-500 bg-slate-50 focus:bg-white outline-none transition-all font-mono text-lg"
+                    value={formData.phoneNumber}
+                    onChange={handlePhoneChange}
                 />
             </div>
 
-            <div className="md:col-span-1">
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  PLZ <span className="text-red-500">*</span>
-                </label>
-                <div className="flex gap-2 justify-between">
+            <div className="space-y-2">
+                <label className="text-xs font-black text-slate-500 uppercase tracking-widest">Postleitzahl *</label>
+                <div className="flex gap-2 justify-between" onPaste={handlePaste}>
                     {zipDigits.map((digit, index) => (
                         <input
                             key={index}
                             ref={(el) => { inputRefs.current[index] = el; }}
                             type="text"
                             inputMode="numeric"
-                            maxLength={5} // Allow 5 specifically for the paste logic in first box, logically restricted to 1 by slicing
+                            maxLength={1}
                             value={digit}
                             onChange={(e) => handleZipChange(index, e.target.value)}
                             onKeyDown={(e) => handleZipKeyDown(index, e)}
-                            className="w-full h-12 text-center text-lg font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all placeholder-slate-200"
-                            placeholder="0"
+                            className={`w-full h-14 text-center text-xl font-black border-2 rounded-xl outline-none transition-all ${
+                                isKnownPlz ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 
+                                isValidFormat ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-100 bg-slate-50 focus:border-brand-500'
+                            }`}
                         />
                     ))}
                 </div>
+                {detectedCity && (
+                    <div className="flex items-center gap-2 text-emerald-600 text-xs font-bold mt-2 animate-slide-up">
+                        <CheckCircle2 size={14} /> Bestätigt: {detectedCity}
+                    </div>
+                )}
+                {isValidFormat && !detectedCity && (
+                    <div className="flex items-center gap-2 text-amber-600 text-xs font-bold mt-2 animate-pulse">
+                        <AlertCircle size={14} /> Neue PLZ erkannt! Bitte Ort angeben:
+                    </div>
+                )}
             </div>
           </div>
 
-          <div>
-            <label htmlFor="companyName" className="block text-sm font-medium text-slate-700 mb-2">
-              Betrieb / Aufdruck (Optional)
-            </label>
+          {isValidFormat && !detectedCity && (
+            <div className="space-y-2 animate-slide-up">
+                <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <PlusCircle size={14} className="text-brand-500" /> Ortsname für {zipDigits.join('')} *
+                </label>
+                <input
+                    type="text"
+                    required
+                    placeholder="z.B. Musterstadt"
+                    className="w-full px-5 py-4 rounded-xl border-2 border-amber-200 focus:border-brand-500 bg-amber-50/30 focus:bg-white outline-none transition-all text-lg font-semibold"
+                    value={manualCity}
+                    onChange={(e) => setManualCity(e.target.value)}
+                />
+                <p className="text-[10px] text-slate-400">Dieser Ort wird zukünftig automatisch für diese PLZ vorgeschlagen.</p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-xs font-black text-slate-500 uppercase tracking-widest">Betrieb / Name auf der Karte</label>
             <input
               type="text"
-              id="companyName"
-              name="companyName"
-              placeholder="z.B. Auto Export Müller"
-              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"
+              placeholder="z.B. Export-Ankauf-Express"
+              className="w-full px-5 py-4 rounded-xl border-2 border-slate-100 focus:border-brand-500 bg-slate-50 focus:bg-white outline-none transition-all"
               value={formData.companyName}
-              onChange={handleChange}
+              onChange={(e) => setFormData({...formData, companyName: e.target.value})}
             />
           </div>
 
-          {/* Optional Toggle */}
-          <div>
+          <div className="pt-2">
             <button
               type="button"
               onClick={() => setShowMore(!showMore)}
-              className="flex items-center text-brand-600 font-medium text-sm hover:text-brand-700 transition-colors focus:outline-none"
+              className="flex items-center text-brand-600 font-bold text-sm hover:text-brand-700 transition-colors"
             >
-              {showMore ? <ChevronUp size={16} className="mr-1"/> : <ChevronDown size={16} className="mr-1"/>}
-              {showMore ? 'Weniger Angaben' : 'Weitere Angaben hinterlegen'}
+              {showMore ? <ChevronUp size={18} className="mr-1"/> : <ChevronDown size={18} className="mr-1"/>}
+              {showMore ? 'Weniger Details' : 'Weitere Angaben hinzufügen'}
             </button>
           </div>
 
-          {/* Collapsible Section */}
           {showMore && (
-            <div className="space-y-6 animate-fade-in bg-slate-50 p-6 rounded-xl border border-slate-100">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
-                  E-Mail-Adresse
-                </label>
+            <div className="space-y-6 animate-fade-in bg-slate-50 p-6 rounded-2xl border border-slate-100">
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500">Deine E-Mail (für Rückfragen)</label>
                 <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  placeholder="mail@beispiel.de"
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
-                  value={formData.email}
-                  onChange={handleChange}
+                    type="email"
+                    placeholder="email@beispiel.de"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-500 outline-none"
+                    value={formData.email}
+                    onChange={(e) => setFormData({...formData, email: e.target.value})}
                 />
               </div>
-              <div>
-                <label htmlFor="description" className="block text-sm font-medium text-slate-700 mb-2">
-                  Beschreibung / Hinweise
-                </label>
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-500">Zusatzinfos (z.B. Fundort)</label>
                 <textarea
-                  id="description"
-                  name="description"
-                  rows={3}
-                  placeholder="z.B. Karte steckte an der Seitenscheibe, sehr aufdringlich..."
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand-500 outline-none"
-                  value={formData.description}
-                  onChange={handleChange}
+                    rows={3}
+                    placeholder="Wo genau hing die Karte?"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-brand-500 outline-none"
+                    value={formData.description}
+                    onChange={(e) => setFormData({...formData, description: e.target.value})}
                 />
               </div>
             </div>
           )}
 
-          {/* Nerv Score Slider */}
-          <div className="pt-4 border-t border-slate-100">
-            <div className="flex justify-between items-center mb-4">
-                <label htmlFor="nervScore" className="font-bold text-slate-800 flex items-center gap-2">
-                    Nerv Score
-                    <div className="group relative">
-                        <Info size={16} className="text-slate-400 cursor-help" />
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-slate-800 text-white text-xs p-2 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                            Wie sehr nervt dich diese Karte? (Häufigkeit, Platzierung, etc.)
-                        </div>
-                    </div>
-                </label>
-                <span className={`text-2xl font-black ${formData.nervScore > 7 ? 'text-red-500' : formData.nervScore > 3 ? 'text-amber-500' : 'text-brand-500'}`}>
-                    {formData.nervScore}/10
-                </span>
+          <div className="pt-6 border-t border-slate-100">
+            <div className="flex justify-between items-center mb-6">
+                <div className="flex flex-col">
+                    <label className="font-black text-slate-800 text-lg">Nerv-Score</label>
+                    <span className="text-xs text-slate-400">Wie belästigend war die Werbung?</span>
+                </div>
+                <div className={`text-3xl font-black px-4 py-1 rounded-2xl transition-colors ${
+                    formData.nervScore > 7 ? 'bg-red-100 text-red-600' : 
+                    formData.nervScore > 4 ? 'bg-amber-100 text-amber-600' : 'bg-brand-100 text-brand-600'
+                }`}>
+                    {formData.nervScore}
+                </div>
             </div>
-            
             <input
-              type="range"
-              id="nervScore"
-              min="1"
-              max="10"
-              step="1"
+              type="range" min="1" max="10" step="1"
               value={formData.nervScore}
-              onChange={handleSliderChange}
-              className={`w-full h-3 bg-slate-200 rounded-lg appearance-none cursor-pointer ${sliderColor}`}
+              onChange={(e) => setFormData({...formData, nervScore: parseInt(e.target.value)})}
+              className="w-full h-3 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-brand-600 mb-2"
             />
-            <div className="flex justify-between text-xs text-slate-500 mt-2 font-medium">
-              <span>Normal genervt</span>
-              <span>Extrem genervt</span>
+            <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                <span>Etwas nervig</span>
+                <span>Nervig</span>
+                <span>Super nervig</span>
             </div>
           </div>
 
-          <div className="pt-4">
-            <button
-              type="submit"
-              disabled={isSubmitting || !formData.phoneNumber || formData.location.length < 5}
-              className={`w-full py-4 rounded-xl text-white font-bold text-lg shadow-lg transition-all transform hover:-translate-y-0.5 
-                ${isSubmitting || !formData.phoneNumber || formData.location.length < 5 ? 'bg-slate-300 cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700 hover:shadow-xl'}`}
-            >
-              {isSubmitting ? 'Wird gesendet...' : 'Meldung absenden'}
-            </button>
-          </div>
-
+          <button
+            type="submit"
+            disabled={isSubmitting || !formData.phoneNumber || !isValidFormat || (!isKnownPlz && !manualCity)}
+            className={`w-full py-5 rounded-2xl text-white font-black text-xl shadow-xl transition-all transform active:scale-[0.98]
+              ${isSubmitting || !formData.phoneNumber || !isValidFormat || (!isKnownPlz && !manualCity) ? 'bg-slate-300 cursor-not-allowed shadow-none' : 'bg-brand-600 hover:bg-brand-700 hover:shadow-brand-500/40'}`}
+          >
+            {isSubmitting ? 'Übermittlung...' : 'Meldung jetzt absenden'}
+          </button>
         </form>
       </div>
     </div>

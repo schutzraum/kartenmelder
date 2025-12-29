@@ -25,9 +25,11 @@ const Admin: React.FC = () => {
   const [editForm, setEditForm] = useState<Partial<Report>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  // Fix: Added cityName and zipCode to state to satisfy Report interface
   const [newReport, setNewReport] = useState({
     phoneNumber: '',
-    location: '',
+    cityName: '',
+    zipCode: '',
     companyName: '',
     nervScore: 5
   });
@@ -73,6 +75,8 @@ const Admin: React.FC = () => {
     sessionStorage.removeItem('admin_auth');
     setUsername('');
     setPassword('');
+    // Resetting state with updated properties
+    setNewReport({ phoneNumber: '', cityName: '', zipCode: '', companyName: '', nervScore: 5 });
   };
 
   // --- Reports Logic ---
@@ -127,20 +131,24 @@ const Admin: React.FC = () => {
 
   const saveNew = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newReport.phoneNumber || !newReport.location) {
-      alert("Telefon und Ort sind Pflichtfelder.");
+    // Updated validation for mandatory fields
+    if (!newReport.phoneNumber || !newReport.cityName || !newReport.zipCode) {
+      alert("Telefon, Stadt und PLZ sind Pflichtfelder.");
       return;
     }
+    // Fix: Pass cityName, zipCode, and constructed location to satisfy Report interface
     reportService.add({
       phoneNumber: newReport.phoneNumber,
-      location: newReport.location,
+      cityName: newReport.cityName,
+      zipCode: newReport.zipCode,
+      location: `${newReport.cityName} (${newReport.zipCode})`,
       companyName: newReport.companyName || undefined,
       nervScore: validateScore(newReport.nervScore),
       description: "Manuell durch Admin hinzugefügt"
     });
     refreshReports();
     setIsAdding(false);
-    setNewReport({ phoneNumber: '', location: '', companyName: '', nervScore: 5 });
+    setNewReport({ phoneNumber: '', cityName: '', zipCode: '', companyName: '', nervScore: 5 });
   };
 
   // --- Feedback Logic ---
@@ -276,14 +284,19 @@ const Admin: React.FC = () => {
                         <div className="bg-brand-50 px-6 py-3 border-b border-brand-100 flex items-center gap-2 text-brand-800 font-bold">
                             <Plus size={18} /> Neuen Eintrag erstellen
                         </div>
-                        <form onSubmit={saveNew} className="p-6 grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                        {/* Updated form to collect cityName and zipCode */}
+                        <form onSubmit={saveNew} className="p-6 grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
                             <div className="md:col-span-1">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Telefon *</label>
                                 <input type="text" name="phoneNumber" value={newReport.phoneNumber} onChange={handleNewChange} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none" placeholder="0176..." required />
                             </div>
                             <div className="md:col-span-1">
-                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Ort *</label>
-                                <input type="text" name="location" value={newReport.location} onChange={handleNewChange} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none" placeholder="Stadt" required />
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Stadt *</label>
+                                <input type="text" name="cityName" value={newReport.cityName} onChange={handleNewChange} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none" placeholder="Stadt" required />
+                            </div>
+                            <div className="md:col-span-1">
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">PLZ *</label>
+                                <input type="text" name="zipCode" value={newReport.zipCode} onChange={handleNewChange} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 outline-none" placeholder="12345" required />
                             </div>
                             <div className="md:col-span-1">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Betrieb</label>
